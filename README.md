@@ -208,3 +208,108 @@ This project details steps used to set up gerrit deployment using kubernetes.
     g. click "Add new attribute" to add "Email" and "displayName" attributes
 #### N.B. the first login on gerrit becomes the admin user so choose a "cn" wisely
 
+## MYSQL
+#### 1. create a PersistentVolumeClaim using persistent disks
+    a. create a pvc manifest file
+    cat > mysql-volumeclaim.yaml
+
+    kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: mysql-volumeclaim
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 200Gi
+
+    b. deploy the manifest
+    kubectl claim -f mysql-volumeclaim.yaml
+
+    c. check to see if the claim has been bound
+    kubectl get pvc
+
+#### 2. create a mysql Deployment
+    a. create a manifest for the deployment
+    cat > mysql.yaml
+
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: mysql
+      labels:
+        app: mysql
+        role: database
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: mysql
+      template:
+        metadata:
+          labels:
+            app: mysql
+            role: database
+        spec:
+          containers:
+            - image: docker.io/mysql/mysql-server:5.7
+                  name: mysql
+                  ports:
+                    - containerPort: <your-port-number>
+                      name: mysql
+          volumes:
+            - name: mysql-persistent-storage
+              persistentVolumeClaim:
+                claimName: mysql-volumeclaim
+
+    b. deploy the manifest
+    kubectl create -f mysql.yaml
+
+    c. check its health, it might take a couple of minutes
+    kubectl get pod -l app=mysql
+
+#### 3. create a Service to expose the mysql container and make it accessible from the other containers
+    a. cat > mysql-service.yaml
+
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: mysql
+      labels:
+        app: mysql
+    spec:
+      type: ClusterIP
+      ports:
+        - port: <your-port-number>
+          targetPort: 3306
+      selector:
+        app: mysql
+
+    b. deploy the manifest and launch the service
+    kubectl create -f mysql-service.yaml
+
+    c. check the health of the created service
+    kubectl get service mysql
+    
+#### 4. view more details about the deployment
+    a. kubectl describe deploy -l app=mysql
+
+#### 5. view more details about the pod
+    a. kubectl describe po -l app=mysql
+
+#### 6. get its default password
+    a. kubectl logs -l app=mysql 2>&1 | grep GENERATED
+
+#### 7. enter container and change default password before you can start using it
+    a. kubectl exec -it MYSQL5.7 bash
+    b. mysql -u root -p<GENERATED PASSWORD>
+    c. ALTER USER 'root'@'localhost' IDENTIFIED BY 'secret';
+    d. create USER 'root'@'%' IDENTIFIED BY 'secret';
+
+#### 8. create a database for gerrit
+    a. create database gerritdb;
+
+#### 9. create a Kubernetes secret to store the password for the new root user
+    a. kubectl create secret generic mysql --from-literal=password=<your-root-password>
+
