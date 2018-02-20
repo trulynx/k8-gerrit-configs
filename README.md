@@ -313,3 +313,140 @@ This project details steps used to set up gerrit deployment using kubernetes.
 #### 9. create a Kubernetes secret to store the password for the new root user
     a. kubectl create secret generic mysql --from-literal=password=<your-root-password>
 
+## GERRIT
+#### 1. create a PersistentVolumeClaim using persistent disks
+    a. create a pvc manifest file
+    cat > gerrit-volumeclaim.yaml
+
+    kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: gerrit-volumeclaim
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 200Gi
+
+    b. deploy the manifest
+    kubectl claim -f gerrit-volumeclaim.yaml
+
+    c. check to see if the claim has been bound
+    kubectl get pvc
+
+
+#### 2. create a gerrit Deployment
+    a. create a manifest for the deployment
+    cat > gerrit.yaml
+
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: gerrit
+      labels:
+        app: gerrit
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: gerrit
+      template:
+        metadata:
+          labels:
+            app: gerrit
+        spec:
+          containers:
+            - name: gerrit
+              image: docker.io/openfrontier/gerrit
+              ports:
+                - containerPort: <your-port-number>
+              env:
+                - name: GITWEB_TYPE
+                  value: gitiles
+                - name: WEBURL
+                  value: http://<web-server-address>:<your-port-number>
+                - name: DATABASE_TYPE
+                  value: mysql
+                - name: DATABASE_HOSTNAME
+                  value: mysql
+                - name: DATABASE_PORT
+                  value: <your-mysql-port-number>
+                - name: DATABASE_DATABASE
+                  value: gerritdb
+                - name: DATABASE_USERNAME
+                  value: root
+                - name: DATABASE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: mysql
+                      key: password
+                - name: AUTH_TYPE
+                  value: LDAP
+                - name: LDAP_SERVER
+                  value: ldap://ldap:<your-ldap-port-number>
+                - name: LDAP_ACCOUNTBASE
+                  value: ou=people,dc=btech,dc=net
+                - name: SMTP_SERVER
+                  value: <your-smtp-server-ip>
+                - name: SMTP_SERVER_PORT
+                  value: <your-smtp-server-port>
+                - name: SMTP_ENCRYPTION
+                  value: <smpt-encryption>
+                - name: SMTP_USER
+                  value: <smtp-username>
+                - name: SMTP_PASS
+                  value: <smtp-password>
+                - name: SMTP_CONNECT_TIMEOUT
+                  value: 10sec
+                - name: SMTP_FROM
+                  value: <smtp-from>
+                - name: USER_NAME
+                  value: <gerrit-username>
+                - name: USER_EMAIL
+                  value: <gerrit-username-email>
+              volumeMounts:
+                - name: gerrit-persistent-storage
+                  mountPath: /var/gerrit/review_site
+          volumes:
+            - name: gerrit-persistent-storage
+              persistentVolumeClaim:
+                claimName: gerrit-volumeclaim
+		  
+    b. deploy the manifest
+    kubectl create -f gerrit.yaml
+
+    c. check its health, it might take a couple of minutes
+    kubectl get pod -l app=gerrit
+
+#### 3. create a Service to expose the gerrit container and make it accessible from the public
+    a. cat > gerrit-service.yaml
+
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: gerrit
+      labels:
+        app: gerrit
+    spec:
+      type: LoadBalancer
+      ports:
+        - port: <your-port-number>
+          targetPort: 8080
+          protocol: TCP
+      selector:
+        app: gerrit
+
+    b. deploy the manifest and launch the service
+    kubectl create -f gerrit-service.yaml
+
+    c. check the health of the created service
+    kubectl get service gerrit
+    
+#### 4. view more details about the deployment
+    a. kubectl describe deploy -l app=gerrit
+
+#### 5. view more details about the pod
+    a. kubectl describe po -l app=gerrit
+
+#### 6. visit the app in the browser using the EXTERNAL-IP value obtained from Service details
